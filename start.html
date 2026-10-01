@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>番茄作者章节备份</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f7f4ee;color:#282922;font:17px/1.8 system-ui,sans-serif;padding:48px 24px}main{max-width:820px;margin:auto}h1{font-size:36px;line-height:1.3;margin:16px 0}section{padding:28px;background:#fff;border:1px solid #e3ddd0;border-radius:16px;margin:24px 0}button{background:#b54819;color:#fff;border:0;border-radius:9px;padding:14px 22px;font:inherit;cursor:pointer}button:focus-visible,a:focus-visible{outline:3px solid #538673;outline-offset:4px}a{color:#a64016}small{color:#666}code{background:#f4f0e8;padding:2px 6px}textarea{width:100%;height:320px;margin-top:16px;font:13px/1.5 monospace}#status{min-height:30px}li{margin:8px 0}
+</style></head>
+<body><main><small>FANQIE AUTHOR BACKUP · 1.0.0</small><h1>你的作品，留一份本地备份。</h1>
+<p>在已登录的番茄作者后台读取自己作品的已发布章节。逐卷分页、核对完整性，导出 TXT 和 JSON。</p>
+<p>觉得有用，欢迎 <a href="https://github.com/ixihuandubook/fanqie-author-backup" target="_blank" rel="noopener noreferrer">⭐ 到 GitHub 点一个 Star 收藏</a>，以后更容易找回来，也支持项目维护。收藏完全自愿，不影响使用。</p>
+<section><h2>运行一次，自动读取</h2><ol><li>点击下面的按钮复制脚本。</li><li>切换到番茄作者后台，打开作品的<strong>章节管理</strong>页。</li><li>按 <code>Ctrl + Shift + J</code> 打开 Console（macOS：<code>⌘ + ⌥ + J</code>），粘贴并回车。</li><li>保持页面打开，等右上角面板完成核对，保存两个文件。</li></ol>
+<button id="copy" type="button">复制只读备份脚本</button><p id="status" role="status" aria-live="polite"></p>
+<p>完成后下载 <strong>小说全文备份.txt</strong> 与 <strong>小说章节备份.json</strong>。浏览器未自动保存时，分别点击结果面板里的下载链接。</p></section>
+<section><h2>只读取，保留核对结果</h2><p>脚本仅调用番茄同源的三个 GET 接口，不读取或上传 Cookie、Token、密码，不修改正文、保存草稿或发布章节。本页面没有外部脚本、统计或网络请求。</p>
+<p>未知接口结构、重复 ID、空正文或数量不一致时会生成未完成报告，并保留已取得正文。报告可能包含整本小说，请勿直接上传到公开 Issue。</p>
+<p>「修改审核中」章节保存的是当前作者正文，可能与读者端版本不同。图片只保留标记。更多细节见 <a href="README.md">README</a>。</p>
+<details><summary>查看与手动复制完整脚本</summary><textarea id="source" aria-label="只读备份脚本" readonly spellcheck="false">/* fanqie-author-backup 1.0.0 | MIT License
+ * 在自己的作品章节管理页 DevTools Console 中运行。仅三个同源 GET 接口。
+ * 不读取 Cookie/localStorage，不加载远程代码，不调用保存/发布接口。
+ * UTF-8 导出；正文保留纯文本和接口原始 HTML。关闭/刷新页面会中止运行。
+ */
+(async () =&gt; {
+  'use strict';
+  const bookId = location.pathname.match(/\/chapter-manage\/(\d+)/)?.[1];
+  if (location.origin !== 'https://fanqienovel.com' || !bookId) {
+    throw new Error('请在已登录的番茄作者后台「章节管理」页面运行。');
+  }
+  let bookTitle = '';
+  try { bookTitle = decodeURIComponent(location.pathname.split('&amp;').slice(1).join('&amp;')); } catch {}
+  if (window.__fanqieReadonlyBackupRunning) throw new Error('已有备份任务正在运行。');
+  window.__fanqieReadonlyBackupRunning = true;
+  const PATHS = {
+    volumes: '/api/author/volume/volume_list/v1',
+    list: '/api/author/chapter/chapter_list/v1',
+    body: '/api/author/edit_article/v0/'
+  };
+  const report = {
+    book_id: bookId, book_title: bookTitle, started_at: new Date().toISOString(),
+    complete: false, script_version: '1.0.0', source: '番茄作者后台 GET 接口（逐卷分页，按返回的实际状态筛选）',
+    content_version: '编辑读取接口返回的当前作者正文；修改审核中的正文可能与读者端版本不同',
+    totals: {}, volumes: [], pages: [], retries: [], failed_chapters: [], excluded_chapters: [],
+    errors: [], response_shapes: [], observed_read_endpoints: [], chapter_manifest: [], chapters: []
+  };
+  const panel = document.createElement('section');
+  panel.style.cssText = 'position:fixed;right:18px;top:18px;z-index:2147483647;background:white;color:#222;border:2px solid #e66b35;border-radius:12px;padding:20px;width:390px;max-height:80vh;overflow:auto;box-shadow:0 6px 24px #0003;font:15px/1.6 sans-serif;';
+  const heading = document.createElement('strong'); heading.textContent = (bookTitle ? '《' + bookTitle + '》' : '当前作品') + '只读备份'; panel.append(heading);
+  const progress = document.createElement('p'); panel.append(progress);
+  const links = document.createElement('div'); panel.append(links); document.body.append(panel);
+  const log = text =&gt; { progress.textContent = text; console.info('[番茄只读备份]', text); };
+  const sleep = ms =&gt; new Promise(resolve =&gt; setTimeout(resolve, ms));
+  const fail = text =&gt; { throw new Error(text); };
+  const id = value =&gt; {
+    if (typeof value === 'number' &amp;&amp; !Number.isSafeInteger(value)) fail('章节 ID 精度异常');
+    if (!/^\d+$/.test(String(value))) fail('章节或分卷 ID 格式异常');
+    return String(value);
+  };
+  const parseJSON = text =&gt; JSON.parse(text.replace(/"(?:\\.|[^"\\])*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
+    token =&gt; token[0] !== '"' &amp;&amp; /^-?\d+$/.test(token) &amp;&amp; !Number.isSafeInteger(Number(token)) ? JSON.stringify(token) : token));
+  const total = value =&gt; {
+    const n = Number(value);
+    if (value == null || !Number.isSafeInteger(n) || n &lt; 0) fail('接口缺少有效 total_count，不能证明完整性');
+    return n;
+  };
+  function shape(data, depth = 0) {
+    if (data == null) return 'null';
+    if (Array.isArray(data)) return {type:'array', length:data.length, first:data.length ? shape(data[0], depth + 1) : null};
+    if (typeof data !== 'object') return typeof data;
+    if (depth &gt; 3) return Object.keys(data).slice(0, 80);
+    return Object.fromEntries(Object.entries(data).slice(0, 80).map(([key, value]) =&gt; [key, shape(value, depth + 1)]));
+  }
+  const rememberedShapes = new Set();
+  async function get(kind, params = {}) {
+    const path = PATHS[kind];
+    if (!path) fail('非白名单读取接口');
+    if (location.origin !== 'https://fanqienovel.com' || location.pathname.match(/\/chapter-manage\/(\d+)/)?.[1] !== bookId) fail('当前页面已切换作品，已停止读取');
+    const url = new URL(path, location.origin);
+    for (const [k,v] of Object.entries({book_id:bookId, ...params})) url.searchParams.set(k, String(v));
+    for (let attempt = 1; attempt &lt;= 3; attempt++) {
+      try {
+        await sleep(350);
+        const response = await fetch(url.href, {method:'GET', credentials:'same-origin', mode:'same-origin', redirect:'error', cache:'no-store', signal:AbortSignal.timeout(30000)});
+        if (!response.ok) { const error = new Error(`HTTP ${response.status}`); error.auth = [401,403].includes(response.status); throw error; }
+        const text = await response.text();
+        if (/^\s*&lt;/.test(text)) fail('接口返回 HTML，可能登录失效或需要验证；已停止解析');
+        const payload = parseJSON(text);
+        const shapeKey = kind + (kind === 'list' ? (payload.data?.item_list?.length ? ':nonempty' : ':empty') : '');
+        if (!rememberedShapes.has(shapeKey)) { report.response_shapes.push({kind:shapeKey, shape:shape(payload)}); rememberedShapes.add(shapeKey); }
+        if (payload.code == null || Number(payload.code) !== 0) fail(`接口业务错误 code=${String(payload.code).slice(0,30)}`);
+        if (!payload.data || typeof payload.data !== 'object') fail('接口缺少 data');
+        return payload.data;
+      } catch (error) {
+        if (error.auth || attempt === 3) throw error;
+        report.retries.push({kind, item_id:params.item_id || null, page_index:params.page_index ?? null, attempt, reason:error.message});
+        await sleep(attempt * 1800);
+      }
+    }
+  }
+  async function listAll(params, label) {
+    if (!params.volume_id) fail('章节读取必须明确指定分卷 ID');
+    const rows = [], seen = new Set(); let expected;
+    for (let page = 0; page &lt; 100000; page++) {
+      const data = await get('list', {page_index:page, page_count:15, status:0, sort:'order_asc', must_have_correction_feedback:0, need_correction_feedback_num:0, ...params});
+      const count = total(data.total_count);
+      if (expected === undefined) expected = count;
+      if (count !== expected) fail(`${label}在读取时总数发生变化，请待后台稳定后重跑`);
+      if (!Array.isArray(data.item_list)) fail('章节列表结构变化：缺少 item_list');
+      report.pages.push({scope:label, volume_id:params.volume_id, status:params.status ?? 0, page_index:page, count:data.item_list.length, total_count:count});
+      for (const item of data.item_list) {
+        const itemId = id(item.item_id);
+        if (seen.has(itemId)) fail(`${label}分页出现重复 ID ${itemId}，不能确认无遗漏`);
+        seen.add(itemId); rows.push({...item, item_id:itemId});
+      }
+      log(`${label}：已读取 ${rows.length}/${expected} 条目录`);
+      if (rows.length &gt; expected) fail(`${label}条数超过后台总数`);
+      if (rows.length === expected) return {rows, total:expected};
+      if (!data.item_list.length) fail(`${label}提前返回空页，仍缺 ${expected - rows.length} 章`);
+    }
+    fail('分页次数异常，任务已停止');
+  }
+  function contentToText(html) {
+    const template = document.createElement('template'); template.innerHTML = html;
+    const walk = node =&gt; {
+      if (node.nodeType === 3) return node.nodeValue;
+      if (node.nodeType !== 1 &amp;&amp; node.nodeType !== 11) return '';
+      const tag = (node.tagName || '').toLowerCase();
+      if (['script','style','iframe','object','embed'].includes(tag)) return '';
+      if (tag === 'br') return '\n';
+      if (tag === 'img') return `[插图${node.getAttribute('alt') ? '：' + node.getAttribute('alt') : ''}；原始标记见 JSON]\n`;
+      const text = Array.from(node.childNodes).map(walk).join('');
+      return text + (['p','div','li','blockquote','h1','h2','h3','h4','h5','h6','tr','section'].includes(tag) ? '\n' : '');
+    };
+    return walk(template.content).replace(/\r\n?/g,'\n').replace(/\u00a0/g,' ').replace(/^\n+|\n+$/g,'');
+  }
+  function metadata(item) {
+    return {item_id:item.item_id, title:item.title || '', volume_id:item.volume_id == null ? null : String(item.volume_id), backend_index:item.index ?? null, display_status:item.display_status, article_status:item.article_status, publish_time:item.publish_time ?? null, word_number:item.word_number ?? null};
+  }
+  function offer(name, content, type) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content], {type})); a.download = name;
+    a.textContent = '下载 ' + name; a.style.cssText = 'display:block;margin:12px 0;color:#b34716;text-decoration:underline;'; links.append(a);
+    return a;
+  }
+  try {
+    // 只保留 Network/Resource Timing 中白名单接口路径与参数名，绝不导出参数值或凭证。
+    report.observed_read_endpoints = performance.getEntriesByType('resource').flatMap(entry =&gt; {
+      try { const u = new URL(entry.name); return u.origin === location.origin &amp;&amp; Object.values(PATHS).includes(u.pathname) ? [{path:u.pathname, parameter_names:[...u.searchParams.keys()].filter(k =&gt; !/token|cookie|sign|password|auth|key/i.test(k))}] : []; } catch { return []; }
+    });
+    log('正在读取分卷和完整章节目录，请保持本页打开。');
+    const volumeData = await get('volumes');
+    if (!Array.isArray(volumeData.volume_list)) fail('分卷接口结构变化：缺少 volume_list');
+    if (volumeData.has_more === true || volumeData.has_more === 1) fail('分卷接口出现未识别的分页，需要核对后继续');
+    const volumeSeen = new Set();
+    report.volumes = volumeData.volume_list.map((v, index) =&gt; {
+      const volumeId = id(v.volume_id); if (volumeSeen.has(volumeId)) fail('分卷 ID 重复'); volumeSeen.add(volumeId);
+      return {order:index + 1, volume_id:volumeId, volume_name:v.volume_name || '', item_count:v.item_count ?? null};
+    });
+    // 当前后台不传 volume_id 会返回 0；全书目录必须由全部分卷的分页结果组成。
+    const globalList = {rows:[], total:0};
+    const membership = new Map();
+    for (const volume of report.volumes) {
+      const part = await listAll({volume_id:volume.volume_id}, `分卷 ${volume.order}`);
+      volume.verified_list_count = part.total;
+      if (volume.item_count != null &amp;&amp; total(volume.item_count) !== part.total) fail(`分卷 ${volume.order}的分卷统计与章节总数不一致`);
+      globalList.total += part.total;
+      for (const row of part.rows) {
+        if (membership.has(row.item_id)) fail('一个章节同时出现在多个分卷 ' + row.item_id);
+        if (row.volume_id != null &amp;&amp; String(row.volume_id) !== volume.volume_id) fail('章节返回的分卷归属不一致');
+        membership.set(row.item_id, volume.volume_id);
+        globalList.rows.push({...row, volume_id:volume.volume_id});
+        report.chapter_manifest.push({...metadata(row), volume_id:volume.volume_id, order:globalList.rows.length});
+      }
+      report.totals.backend_all_statuses = globalList.total;
+    }
+    // 实际后台忽略 status 筛选参数，1 和 5 均返回全部章节。
+    // 完整分页后，以每条记录的 display_status 判定，不对筛选请求的计数求和。
+    const publishedRows = globalList.rows.filter(row =&gt; Number(row.display_status) === 1);
+    const modifyingRows = globalList.rows.filter(row =&gt; Number(row.display_status) === 5);
+    for (const volume of report.volumes) {
+      volume.published_count = publishedRows.filter(row=&gt;row.volume_id === volume.volume_id).length;
+      volume.modifying_count = modifyingRows.filter(row=&gt;row.volume_id === volume.volume_id).length;
+    }
+    report.totals.backend_published_status_1 = publishedRows.length;
+    report.totals.backend_modifying_status_5 = modifyingRows.length;
+    report.status_count_method = '按全部分卷分页结果的 display_status 逐条计数，状态 1=已发布，5=修改审核中';
+    const selected = new Set([...publishedRows, ...modifyingRows].map(x =&gt; x.item_id));
+    for (const row of globalList.rows) {
+      const state = Number(row.display_status);
+      if (![1,4,5,7,10].includes(state)) fail('出现未知章节状态 ' + state + '，需核实后才能确认备份范围');
+      if ([1,5].includes(state) !== selected.has(row.item_id)) fail('全书目录与已发布筛选的章节集合不一致');
+      if (!selected.has(row.item_id)) {
+        report.excluded_chapters.push(metadata(row));
+        // 拒绝把可能曾发布的审核/退回章节悄悄略去。
+        if ([4,7].includes(state) &amp;&amp; row.publish_time &amp;&amp; String(row.publish_time) !== '0') fail('有审核中/未通过章节带有发布时间，需要确认是否属于已发布旧版本；已输出诊断报告');
+      }
+    }
+    const ordered = globalList.rows.filter(row =&gt; selected.has(row.item_id));
+    report.chapter_manifest.forEach(row =&gt; { row.selected_for_backup = selected.has(row.item_id); });
+    report.totals.backend_published_including_modifications = ordered.length;
+    if (!ordered.length) fail('未识别到已发布章节，不生成空的成功备份');
+    const results = new Map(), attempts = new Map();
+    const readChapter = async (row, index) =&gt; {
+      attempts.set(row.item_id, (attempts.get(row.item_id) || 0) + 1);
+      const data = await get('body', {item_id:row.item_id, from_source:0});
+      if (data.item_id != null &amp;&amp; id(data.item_id) !== row.item_id) fail('正文返回的章节 ID 不匹配');
+      if (data.book_id != null &amp;&amp; id(data.book_id) !== bookId) fail('正文返回的作品 ID 不匹配');
+      if (data.column_data?.book_id != null &amp;&amp; id(data.column_data.book_id) !== bookId) fail('正文作品信息的 ID 不匹配');
+      if (typeof data.column_data?.book_name === 'string' &amp;&amp; data.column_data.book_name.trim()) {
+        report.book_title = data.column_data.book_name;
+        heading.textContent = '《' + report.book_title + '》只读备份';
+      }
+      if (typeof data.title !== 'string' || !data.title.trim()) fail('正文接口返回空标题');
+      if (data.title !== row.title) fail('目录与正文标题不同，可能正在修改');
+      if (typeof data.content !== 'string') fail('正文 content 类型变化');
+      const content = contentToText(data.content);
+      if (!content.trim()) fail('正文为空');
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data.content));
+      results.set(row.item_id, {...metadata(row), order:index + 1, volume_id:membership.get(row.item_id), title:data.title,
+        content, content_html:data.content, content_html_sha256:Array.from(new Uint8Array(digest), x=&gt;x.toString(16).padStart(2,'0')).join(''),
+        content_text_characters:[...content].length, fetched_at:new Date().toISOString()});
+      report.chapters = ordered.map(x=&gt;results.get(x.item_id)).filter(Boolean);
+      report.totals.exported = report.chapters.length;
+    };
+    let pending = ordered.map((row,index)=&gt;({row,index}));
+    for (let round=1; round&lt;=3 &amp;&amp; pending.length; round++) {
+      const failed=[];
+      for (const entry of pending) {
+        log(`读取正文 ${results.size}/${ordered.length}；第 ${round} 轮：${entry.row.title}`);
+        try { await readChapter(entry.row, entry.index); }
+        catch (error) { failed.push({...entry, reason:error.message}); }
+      }
+      pending=failed;
+      if (pending.length &amp;&amp; round&lt;3) { log(`本轮有 ${pending.length} 章失败，稍后自动重试。`); await sleep(3000 * round); }
+    }
+    report.chapters = ordered.map(x=&gt;results.get(x.item_id)).filter(Boolean);
+    report.failed_chapters = pending.map(x=&gt;({...metadata(x.row), reason:x.reason, attempts:attempts.get(x.row.item_id)}));
+    report.totals.exported = report.chapters.length;
+    // 第二次完整扫描验证开始/结束时 ID 顺序、标题、状态未改变。
+    const finalVolumes = await get('volumes');
+    const volumeSignature = volumes =&gt; JSON.stringify(volumes.map(v=&gt;[String(v.volume_id),v.volume_name,v.item_count]));
+    if (!Array.isArray(finalVolumes.volume_list) || volumeSignature(finalVolumes.volume_list) !== volumeSignature(report.volumes)) fail('备份期间分卷或分卷统计发生变化，已保存取得的正文');
+    const finalList = {rows:[],total:0};
+    for (const volume of report.volumes) {
+      const part = await listAll({volume_id:volume.volume_id}, `导出后核对分卷 ${volume.order}`);
+      finalList.rows.push(...part.rows.map(row=&gt;({...row,volume_id:volume.volume_id}))); finalList.total+=part.total;
+    }
+    const signature = rows =&gt; JSON.stringify(rows.map(x=&gt;[x.item_id,x.title,x.display_status,x.volume_id ?? null,x.word_number ?? null,x.publish_time ?? null]));
+    if (signature(finalList.rows) !== signature(globalList.rows)) fail('备份期间目录发生变化，不能标记完整；已保存已取得正文');
+    if (report.failed_chapters.length || report.chapters.length !== ordered.length) fail('存在失败/空正文章节，已重试并保存失败清单');
+    report.complete = true;
+    report.completed_at = new Date().toISOString();
+    const json = offer('小说章节备份.json', JSON.stringify(report,null,2), 'application/json;charset=utf-8');
+    const txt = offer('小说全文备份.txt', '\ufeff' + report.chapters.map(c=&gt;c.title+'\r\n\r\n'+c.content.replace(/\n/g,'\r\n')).join('\r\n\r\n\r\n'), 'text/plain;charset=utf-8');
+    log(`核对通过：后台已发布 ${ordered.length} 章 = 成功导出 ${report.chapters.length} 章；${report.volumes.length} 个分卷，失败 0，空正文 0。请保存下面两个文件。全部状态目录共 ${globalList.total} 章，其中未发布 ${report.excluded_chapters.length} 章未纳入正文。`);
+    console.info('[番茄备份核对结果]', {complete:true, ...report.totals, volumes:report.volumes.length, failed:0, empty:0});
+    json.click(); await sleep(1500); txt.click();
+  } catch (error) {
+    report.errors.push(error.message); report.completed_at = new Date().toISOString();
+    log('尚未完整备份：' + error.message + '。请保存诊断/部分备份 JSON。它可能包含小说正文，请勿直接上传到公开 Issue。');
+    offer('小说备份未完成-诊断及已取得正文.json', JSON.stringify(report,null,2), 'application/json;charset=utf-8').click();
+    console.error('[番茄只读备份未完成]', error.message);
+  } finally {
+    window.__fanqieReadonlyBackupRunning = false;
+  }
+})();
+</textarea></details></section>
+<small>仅用于备份你拥有或获授权访问的作品。社区工具，与番茄官方无关联。MIT License。</small></main>
+<script>
+document.getElementById('copy').addEventListener('click',async()=>{
+  const box=document.getElementById('source'),status=document.getElementById('status');
+  try{await navigator.clipboard.writeText(box.value);status.textContent='已复制。请切回番茄章节管理页，在 Console 粘贴并回车。';}
+  catch{box.closest('details').open=true;box.focus();box.select();status.textContent=document.execCommand('copy')?'已复制，请切回番茄页面运行。':'脚本已选中，请按 Ctrl+C（macOS：⌘+C）复制。';}
+});
+</script></body></html>

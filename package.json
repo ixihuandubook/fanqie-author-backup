@@ -1,0 +1,16 @@
+{
+  "name": "fanqie-author-backup",
+  "version": "1.0.0",
+  "private": true,
+  "description": "番茄小说作者后台批量备份与全文导出：全部分卷、已发布章节、TXT / JSON，只读不改稿。Fanqie author novel backup and chapter export.",
+  "repository": { "type": "git", "url": "https://github.com/ixihuandubook/fanqie-author-backup.git" },
+  "homepage": "https://github.com/ixihuandubook/fanqie-author-backup#readme",
+  "keywords": ["fanqie", "fanqienovel", "fanqie-author-backup", "novel-backup", "chapter-export", "txt-export", "json-export", "manuscript-backup", "read-only", "browser-script", "javascript", "pagination", "番茄小说", "小说备份", "作者后台", "全文导出", "批量下载", "网文归档"],
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "check": "node --check src/backup.js && node scripts/build.cjs --check",
+    "test": "node --test test/*.test.cjs"
+  }
+}

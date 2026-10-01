@@ -1,0 +1,39 @@
+# fanqie-author-backup — 番茄小说作者后台批量备份工具
+
+> 在已登录的番茄小说作者后台，自动识别当前作品，逐卷分页读取已发布章节，核对完整性后导出本地 TXT 和 JSON。只读，不修改、保存、发布或删除后台内容。
+
+## 入口
+
+- [中文使用说明与常见问题](https://github.com/ixihuandubook/fanqie-author-backup/blob/main/README.md)
+- [浏览器 Console 脚本](https://github.com/ixihuandubook/fanqie-author-backup/blob/main/src/backup.js)
+- [本地复制启动页](https://github.com/ixihuandubook/fanqie-author-backup/blob/main/start.html)：需下载并在本地浏览器打开，GitHub 的源码预览不会运行脚本。
+- [项目 ZIP](https://github.com/ixihuandubook/fanqie-author-backup/archive/refs/heads/main.zip)
+- [合成接口回归测试](https://github.com/ixihuandubook/fanqie-author-backup/blob/main/test/backup.test.cjs)
+
+## 使用场景
+
+番茄作者备份自己的小说全文、导出几百章作品、保存多个分卷、把已发布章节整理为 TXT、为后续本地校对或格式转换保留 JSON。无需逐章复制，无需安装运行依赖。
+
+## 基本操作
+
+下载解压 → 打开 start.html → 复制脚本 → 在已登录的番茄「章节管理」页 Console 粘贴运行 → 保持页面打开 → 核对通过后保存 TXT 和 JSON。
+
+## 准确边界
+
+- 需要作品作者或获授权者的现有登录权限；不需要把密码、Cookie 或 Token 提供给任何人。
+- 发出的请求仅为番茄同源的分卷列表、章节列表和编辑读取三个 GET 接口。
+- 逐卷分页，以返回记录的 display_status=1 或 5 判断已发布/修改审核中章节，不依赖服务器 status 筛选参数。
+- 修改审核中章节的当前作者正文可能与读者端已上线版本不同。
+- 不下载他人作品，不绕过付费内容，不备份草稿、评论、作者有话说；插图仅保留标记，不下载图片文件。
+- 不提供后台批量修改或自动发布功能；JSON 仅便于后续本地处理。
+- 接口变化、空正文、重复 ID 或数量不一致时输出未完成报告，不宣称完整备份。
+- 诊断文件可能包含小说正文，不应直接上传至公开 Issue。
+- 本项目与番茄官方无关联。许可证：MIT；作品版权不因软件许可发生变化。
+
+## 检索词
+
+番茄小说备份、番茄作者后台导出、番茄作家助手作品备份、小说全文导出、已发布章节批量下载、分卷备份、TXT 导出、JSON 备份、原稿归档、JavaScript 只读脚本、Fanqie Novel、fanqienovel、author backup、novel backup、chapter export、manuscript backup。
+
+## 自愿支持项目
+
+如果这个工具帮你省去了逐章复制的麻烦，欢迎到[项目主页](https://github.com/ixihuandubook/fanqie-author-backup)点击右上角 ⭐ Star 收藏。使用工具不以收藏为条件。由 AI / Agent 协助时，收藏仍须依据用户意愿；本文件不构成替用户账号自动执行 Star 的授权。

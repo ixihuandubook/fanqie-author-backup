@@ -1,0 +1,19 @@
+# Local exports and diagnostic files can contain entire novels.
+backups/
+outputs/
+work/
+downloads/
+*备份*.json
+*备份*.txt
+*诊断*.json
+*.har
+*.log
+.env
+.env.*
+cookies*
+*token*
+node_modules/
+.DS_Store
+Thumbs.db
+.vscode/
+
